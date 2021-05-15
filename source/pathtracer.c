@@ -40,7 +40,8 @@ float frand()
 	return (float)rand() / (float)RAND_MAX;
 }
 
-float3 float3_rand_unit_sphere()
+// Generate a random point on the surface of a unit sphere.
+float3 f3_rand_unit_sphere()
 {
 	float z = frand() * 2.0f - 1.0f;
 	float a = frand() * 2.0f * (float)M_PI;
@@ -211,15 +212,15 @@ bool pt_scatter_diffuse(const struct pt_geom* geom, const pt_hit* hit, pt_ray* r
 	// Lambertian
 	*attn = (*attn) * materials[hit->id];
 
-	// Next ray; optimized, cosine-weighted distribution fn.
+	// Next ray; cosine-weighted distribution fn.
 	ray->origin = hit->point;
-	ray->dir = normalize(hit->normal + float3_rand_unit_sphere());
+	ray->dir = normalize(hit->normal + f3_rand_unit_sphere());
 /*
-	// Uniform distribution fn, separate cosine-weighting.
-	ray.dir = float3_normalize(float3_rand_unit_sphere());
-	if (float3_dot(ray.dir, hit.normal) < 0)
-	ray.dir *= -1.0f;
-	refl *= float3_dot(ray.dir, hit.normal) * 2;
+	// Next ray; uniform distribution fn, separate cosine-weighting.
+	ray->dir = normalize(f3_rand_unit_sphere());
+	if (dot(ray->dir, hit->normal) < 0)
+		ray->dir *= -1.0f;
+	*attn *= dot(ray->dir, hit->normal) * 2;
 */
 	return true;
 }
@@ -233,16 +234,16 @@ bool pt_scatter_light(const struct pt_geom* geom, const pt_hit* hit, pt_ray* ray
 }
 
 // Background
-float3 pt_background(pt_ray r)
+float3 pt_background(pt_ray ray)
 {
 	const float3 color_gray5 = (float3){ 0.5f, 0.5f, 0.5f };
 	return color_gray5;
 /*
-	float3 dir = float3_normalize(r.dir);
-	float t = 0.5f * (dir.y() + 1.0f);
-	const float3 color_gray3 = float3f(0.3f, 0.3f, 0.3f);
-	const float3 color_skyblue = srgb_to_linear(float3f(0.3f, 0.56f, 0.675f)); // 77,143,172 Sora-iro, sky blue
-	return float3_lerp(color_gray3, color_skyblue, t*t);
+	float3 dir = normalize(ray.dir);
+	float t = 0.5f * (dir.y + 1.0f);
+	const float3 color_gray3 = (float3){ 0.3f, 0.3f, 0.3f };
+	const float3 color_skyblue = srgb_to_linear((float3){ 0.3f, 0.56f, 0.675f }); // 77,143,172 Sora-iro, sky blue
+	return lerp(color_gray3, color_skyblue, t*t);
 */
 }
 
