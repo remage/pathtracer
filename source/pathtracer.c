@@ -59,11 +59,14 @@ float3 __vectorcall srgb_to_linear(float3 color)
 	return lerp(pow((color + 0.055) / 1.055, 2.4), color / 12.92, mask.xyz);
 }
 
+// Approximation for linear to sRGB transformation.
+// http://chilliant.blogspot.com/2012/08/srgb-approximations-for-hlsl.html
 float3 __vectorcall linear_to_srgb(float3 color)
 {
 	float4 c1 = _mm_sqrt_ps(color.xyzz);
 	float4 c2 = _mm_sqrt_ps(c1);
 	float4 c3 = _mm_sqrt_ps(c2);
+//	return max(0, 0.585122381 * c1 + 0.783140355 * c2 - 0.368262736 * c3).xyz;
 	return max(0, 0.662002687 * c1 + 0.684122060 * c2 - 0.323583601 * c3 - 0.0225411470 * color.xyzz).xyz;
 //	return max(0, 1.055 * pow(color, 0.416666667) - 0.055);
 }
@@ -230,8 +233,32 @@ bool pt_scatter_diffuse(const struct pt_geom* geom, const pt_material* mat, cons
 	ray->dir = normalize(f3_rand_unit_sphere());
 	if (dot(ray->dir, hit->normal) < 0)
 		ray->dir *= -1.0f;
-	*attn *= dot(ray->dir, hit->normal) * 2;
+	*attn *= 2.0 * dot(ray->dir, hit->normal);
 */
+	return true;
+}
+
+bool pt_scatter_oren_nayar(const struct pt_geom* geom, const pt_material* mat, const pt_hit* hit, pt_ray* ray, float3* attn)
+{
+	// Reflect the incoming ray to a random direction (cosine-weighted distribution fn).
+	float3 refl = normalize(hit->normal + f3_rand_unit_sphere());
+
+	float roughness = 0.5;
+	float sigma = roughness*roughness / sqrt(2.0);
+	float sigma2 = sigma*sigma;
+	float a = 1.0 - 0.5 * sigma2 / (sigma2 + 0.33);
+	float b = 0.45 * sigma2 / (sigma2 + 0.09);
+	float phi_i = acos(min(max(dot(hit->normal, -ray->dir), -1.0), 1.0));
+	float phi_r = acos(min(max(dot(hit->normal, refl), -1.0), 1.0));
+	float alpha = max(phi_i, phi_r);
+	float beta = min(phi_i, phi_r);
+
+	*attn *= a + b * max(0.0, cos(phi_r - phi_i)) * sin(alpha) * tan(beta);
+	*attn *= mat->color;
+
+	// Next ray; 
+	ray->origin = hit->point;
+	ray->dir = refl;
 	return true;
 }
 
@@ -272,6 +299,7 @@ void render_sphere3_v1()
 		{ &pt_geom_plane_trace,  &pt_scatter_diffuse, .plane  = { (float3){ 0.0f, -1.0f, 0.0f }, (float3){ 0.0f, 1.0f, 0.0f }}, .mat = { (float3){ 0.5f, 0.5f, 0.5f }}},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  0.0f, 0.0f, 0.0f }, 1.0f },						.mat = { srgb_to_linear((float3){ 0.788f, 0.122f, 0.216f }) }},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){ -2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 1.0f, 1.0f, 1.0f }}},
+//		{ &pt_geom_sphere_trace, &pt_scatter_oren_nayar, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
 //		{ &pt_geom_sphere_trace, &pt_scatter_light,   .sphere = { (float3){  1.0f, 1.732f, 0.0f }, 1.0f },                      .mat = { (float3){ 1.0f, 1.0f, 1.0f }}},
 		{ &pt_geom_sky_trace,    &pt_scatter_light,   																			.mat = { (float3){ 0.5f, 0.5f, 0.5f }}},
