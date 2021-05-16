@@ -4,7 +4,9 @@
 #include <float.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <intrin.h>
 #include <immintrin.h>
+#include <x86intrin.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -27,33 +29,43 @@ inline float3 __vectorcall f3_powf(float3 v1, float f) { return (float3){ powf(v
 #define pow(a, b) _Generic((a), float3:f3_powf, float:powf, default:pow)(a, b)
 
 
-float frand()
+// Fast signed floating-point [-1.0, +1.0] random generator.
+// https://www.iquilezles.org/www/articles/sfrand/sfrand.htm
+inline float sfrand()
 {
-	return (float)(rand()) / (float)RAND_MAX;
+	// #fixme thread_local?
+	static unsigned int seed = 303;
+	float res;
+	seed *= 16807;
+	*((unsigned int *) &res) = (seed>>9) | 0x40000000;
+	return res - 3.0f;
 }
 
 // Generate a random point on the surface of a unit sphere.
-float3 f3_rand_unit_sphere()
+float3 __vectorcall f3_rand_unit_sphere()
 {
-	float z = frand() * 2.0f - 1.0f;
-	float a = frand() * 2.0f * M_PI;
+	float z = sfrand();
+	float a = sfrand() * M_PI;
 	float r = sqrtf(1.0f - z*z);
 	float x = r * cosf(a);
 	float y = r * sinf(a);
 	return (float3){ x, y, z };
 }
 
-float3 srgb_to_linear(float3 color)
+float3 __vectorcall srgb_to_linear(float3 color)
 {
 	// (color <= 0.04045) ? (color / 12.92) : pow((color + 0.055) / 1.055, 2.4);
 	float4 mask = _mm_cmple_ps(color.xyzz, (float4)(0.04045f));
 	return lerp(pow((color + 0.055) / 1.055, 2.4), color / 12.92, mask.xyz);
 }
 
-float3 linear_to_srgb(float3 color)
+float3 __vectorcall linear_to_srgb(float3 color)
 {
-	// max(0, 1.055 * pow(color, 0.416666667) - 0.055);
-	return max(0, 1.055 * pow(color, 0.416666667) - 0.055);
+	float4 c1 = _mm_sqrt_ps(color.xyzz);
+	float4 c2 = _mm_sqrt_ps(c1);
+	float4 c3 = _mm_sqrt_ps(c2);
+	return max(0, 0.662002687 * c1 + 0.684122060 * c2 - 0.323583601 * c3 - 0.0225411470 * color.xyzz).xyz;
+//	return max(0, 1.055 * pow(color, 0.416666667) - 0.055);
 }
 
 
@@ -63,7 +75,7 @@ struct pt_ray
 	float3 origin, dir;
 };
 
-float3 pt_ray_trace(const pt_ray ray, float t)
+inline float3 __vectorcall pt_ray_trace(const pt_ray ray, float t)
 {
 	return ray.origin + ray.dir * t;
 }
@@ -77,9 +89,15 @@ struct pt_hit
 	int id;
 };
 
+typedef struct pt_material pt_material;
+struct pt_material
+{
+	float3 color;
+};
+
 struct pt_geom;
 typedef bool pt_trace_fn(const struct pt_geom* geom, pt_hit* hit, const pt_ray ray, float t_min, float t_max);
-typedef bool pt_scatter_fn(const struct pt_geom* geom, const pt_hit* hit, pt_ray* ray, float3* attn);
+typedef bool pt_scatter_fn(const struct pt_geom* geom, const struct pt_material* mat, const pt_hit* hit, pt_ray* ray, float3* attn);
 
 
 typedef struct pt_geom_sphere pt_geom_sphere;
@@ -106,6 +124,7 @@ struct pt_geom
 		pt_geom_plane plane;
 		pt_geom_sphere sphere;
 	};
+	pt_material mat;
 };
 
 // Geom: Sphere
@@ -192,30 +211,16 @@ bool pt_scene_trace(const pt_geom* geoms, pt_hit* hit, const pt_ray ray, float t
 	return temp.id >= 0;
 }
 
-bool pt_scene_scatter(const struct pt_geom* geoms, const pt_hit* hit, pt_ray* ray, float3* attn)
+bool pt_scene_scatter(const pt_geom* geoms, const pt_hit* hit, pt_ray* ray, float3* attn)
 {
-	return geoms[hit->id].scatter_fn(&geoms[hit->id], hit, ray, attn);
+	return geoms[hit->id].scatter_fn(&geoms[hit->id], &geoms[hit->id].mat, hit, ray, attn);
 }
 
 // BRDF: Diffuse.
-bool pt_scatter_diffuse(const struct pt_geom* geom, const pt_hit* hit, pt_ray* ray, float3* attn)
+bool pt_scatter_diffuse(const struct pt_geom* geom, const pt_material* mat, const pt_hit* hit, pt_ray* ray, float3* attn)
 {
-	const float3 color_gray3 = { 0.3f, 0.3f, 0.3f };
-	const float3 color_gray5 = { 0.5f, 0.5f, 0.5f };
-	const float3 color_white = { 1.0f, 1.0f, 1.0f };
-	const float3 color_crimson = srgb_to_linear((float3){ 0.788f, 0.122f, 0.216f }); // 201,31,55 Karakurenai, foreign crimson
-
-	// #fixme Material color needs to go to the scene definition.
-	float3 materials[] = 
-	{
-		color_gray5,
-		color_crimson,
-		color_white,
-		color_gray3
-	};
-
 	// Lambertian
-	*attn *= materials[hit->id];
+	*attn *= mat->color;
 
 	// Next ray; cosine-weighted distribution fn.
 	ray->origin = hit->point;
@@ -231,12 +236,9 @@ bool pt_scatter_diffuse(const struct pt_geom* geom, const pt_hit* hit, pt_ray* r
 }
 
 // #todo BRDF: Light source. 
-bool pt_scatter_light(const struct pt_geom* geom, const pt_hit* hit, pt_ray* ray, float3* attn)
+bool pt_scatter_light(const pt_geom* geom, const pt_material* mat, const pt_hit* hit, pt_ray* ray, float3* attn)
 {
-//	const float3 color_white = (float3){ 1.0f, 1.0f, 1.0f };
-	const float3 color_gray5 = (float3){ 0.5f, 0.5f, 0.5f };
-//	*attn *= (hit->id == 4) ? color_white : color_gray5; // #todo Light colors.
-	*attn *= color_gray5;
+	*attn *= mat->color;
 	return false;
 /*
 	float3 dir = normalize(ray.dir);
@@ -267,12 +269,12 @@ void render_sphere3_v1()
 	// Scene definition.
 	pt_geom scene[] = 
 	{ 
-		{ &pt_geom_plane_trace,  &pt_scatter_diffuse, .plane  = { (float3){ 0.0f, -1.0f, 0.0f }, (float3){ 0.0f, 1.0f, 0.0f }}},
-		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  0.0f, 0.0f, 0.0f }, 1.0f }},
-		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){ -2.0f, 0.0f, 0.0f }, 1.0f }},
-		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f }},
-//		{ &pt_geom_sphere_trace, &pt_scatter_light,   .sphere = { (float3){  1.0f, 1.732f, 0.0f }, 1.0f }}, // #todo Light colors.
-		{ &pt_geom_sky_trace,    &pt_scatter_light },
+		{ &pt_geom_plane_trace,  &pt_scatter_diffuse, .plane  = { (float3){ 0.0f, -1.0f, 0.0f }, (float3){ 0.0f, 1.0f, 0.0f }}, .mat = { (float3){ 0.5f, 0.5f, 0.5f }}},
+		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  0.0f, 0.0f, 0.0f }, 1.0f },						.mat = { srgb_to_linear((float3){ 0.788f, 0.122f, 0.216f }) }},
+		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){ -2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 1.0f, 1.0f, 1.0f }}},
+		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
+//		{ &pt_geom_sphere_trace, &pt_scatter_light,   .sphere = { (float3){  1.0f, 1.732f, 0.0f }, 1.0f },                      .mat = { (float3){ 1.0f, 1.0f, 1.0f }}},
+		{ &pt_geom_sky_trace,    &pt_scatter_light,   																			.mat = { (float3){ 0.5f, 0.5f, 0.5f }}},
 		{ NULL }
 	};
 
@@ -285,6 +287,8 @@ void render_sphere3_v1()
 	float3 cam_h = { 1.0f, 0.0f, 0.0f }; // fov_h = 90
 	float3 cam_v = { 0.0f, - (float)image_height / (float)image_width, 0.0f };
 
+	uint64_t tsc0 = __rdtsc();
+
 	// Path tracing!
 	int i = 0;
 	for (int y = 0; y < image_height; y++)
@@ -296,8 +300,8 @@ void render_sphere3_v1()
 			for (int s = 0; s < num_samples; s++)
 			{
 				// #todo Gaussian AA, instead of box.
-				float aa_x = (float)rand() / (float)(RAND_MAX) - 0.5f;
-				float aa_y = (float)rand() / (float)(RAND_MAX) - 0.5f;
+				float aa_x = 0.5f * sfrand();
+				float aa_y = 0.5f * sfrand();
 				float ray_x = ((float)x + aa_x) / (float)(image_width-1) * 2.0f - 1.0f;
 				float ray_y = ((float)y + aa_y) / (float)(image_height-1) * 2.0f - 1.0f;
 
@@ -336,6 +340,9 @@ void render_sphere3_v1()
 			image_data_srgb[i++] = (int)(255 * color_acc.z);
 		}
 	}
+
+	uint64_t tsc = __rdtsc() - tsc0;
+	printf(" CPU cycles = %llu M\n", tsc / 1000000);
 
 	stbi_write_png("sphere3_v1.png", image_width, image_height, 3, image_data_srgb, image_width * 3);
 }
