@@ -6,20 +6,12 @@
 #include <stdbool.h>
 #include <immintrin.h>
 
-#define WIN32_LEAN_AND_MEAN
-#define MICROSOFT_WINDOWS_WINBASE_H_DEFINE_INTERLOCKED_CPLUSPLUS_OVERLOADS 0
-#include <Windows.h>
-
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-#ifndef nullptr
-#define nullptr (void*)0
-#endif
-
 
 #if !__has_attribute(ext_vector_type)
-#error Unsupported C language extension 'ext_vector_type'.
+#error Unsupported C language extension 'ext_vector_type', use Clang to compile.
 #endif
 
 typedef float __attribute__((ext_vector_type(3))) float3;
@@ -37,14 +29,14 @@ inline float3 __vectorcall f3_powf(float3 v1, float f) { return (float3){ powf(v
 
 float frand()
 {
-	return (float)rand() / (float)RAND_MAX;
+	return (float)(rand()) / (float)RAND_MAX;
 }
 
 // Generate a random point on the surface of a unit sphere.
 float3 f3_rand_unit_sphere()
 {
 	float z = frand() * 2.0f - 1.0f;
-	float a = frand() * 2.0f * (float)M_PI;
+	float a = frand() * 2.0f * M_PI;
 	float r = sqrtf(1.0f - z*z);
 	float x = r * cosf(a);
 	float y = r * sinf(a);
@@ -65,17 +57,18 @@ float3 linear_to_srgb(float3 color)
 }
 
 
+typedef struct pt_ray pt_ray;
 struct pt_ray
 {
 	float3 origin, dir;
 };
-typedef struct pt_ray pt_ray;
 
 float3 pt_ray_trace(const pt_ray ray, float t)
 {
 	return ray.origin + ray.dir * t;
 }
 
+typedef struct pt_hit pt_hit;
 struct pt_hit
 {
 	float3 point;
@@ -83,27 +76,27 @@ struct pt_hit
 	float t;
 	int id;
 };
-typedef struct pt_hit pt_hit;
 
 struct pt_geom;
 typedef bool pt_trace_fn(const struct pt_geom* geom, pt_hit* hit, const pt_ray ray, float t_min, float t_max);
 typedef bool pt_scatter_fn(const struct pt_geom* geom, const pt_hit* hit, pt_ray* ray, float3* attn);
 
 
+typedef struct pt_geom_sphere pt_geom_sphere;
 struct pt_geom_sphere
 {
 	float3 center;
 	float radius;
 };
-typedef struct pt_geom_sphere pt_geom_sphere;
 
+typedef struct pt_geom_plane pt_geom_plane;
 struct pt_geom_plane
 {
 	float3 p0;
 	float3 normal;
 };
-typedef struct pt_geom_plane pt_geom_plane;
 
+typedef struct pt_geom pt_geom;
 struct pt_geom
 {
 	pt_trace_fn* trace_fn;
@@ -114,7 +107,6 @@ struct pt_geom
 		pt_geom_sphere sphere;
 	};
 };
-typedef struct pt_geom pt_geom;
 
 // Geom: Sphere
 bool pt_geom_sphere_trace(const pt_geom* geom, pt_hit* hit, const pt_ray ray, float t_min, float t_max)
@@ -172,11 +164,24 @@ bool pt_geom_plane_trace(const pt_geom* geom, pt_hit* hit, const pt_ray ray, flo
 	return false;
 }
 
+// Geom: Sky
+bool pt_geom_sky_trace(const pt_geom* geom, pt_hit* hit, const pt_ray ray, float t_min, float t_max)
+{
+	if (t_max == FLT_MAX)
+	{
+		hit->t = t_max;
+		hit->point = pt_ray_trace(ray, t_max);
+		hit->normal = -ray.dir;
+		return true;
+	}
+	return false;
+}
+
 // Scene
 bool pt_scene_trace(const pt_geom* geoms, pt_hit* hit, const pt_ray ray, float t_min, float t_max)
 {
 	pt_hit temp = { .t = t_max, .id = -1 };
-	for (int i = 0; geoms[i].trace_fn != nullptr; i++)
+	for (int i = 0; geoms[i].trace_fn != NULL; i++)
 	{
 		if (geoms[i].trace_fn(&geoms[i], &temp, ray, t_min, temp.t))
 		{
@@ -210,7 +215,7 @@ bool pt_scatter_diffuse(const struct pt_geom* geom, const pt_hit* hit, pt_ray* r
 	};
 
 	// Lambertian
-	*attn = (*attn) * materials[hit->id];
+	*attn *= materials[hit->id];
 
 	// Next ray; cosine-weighted distribution fn.
 	ray->origin = hit->point;
@@ -228,16 +233,11 @@ bool pt_scatter_diffuse(const struct pt_geom* geom, const pt_hit* hit, pt_ray* r
 // #todo BRDF: Light source. 
 bool pt_scatter_light(const struct pt_geom* geom, const pt_hit* hit, pt_ray* ray, float3* attn)
 {
-	const float3 color_white = (float3){ 1.0f, 1.0f, 1.0f };
-	*attn = (*attn) * color_white;
-	return false;
-}
-
-// Background
-float3 pt_background(pt_ray ray)
-{
+//	const float3 color_white = (float3){ 1.0f, 1.0f, 1.0f };
 	const float3 color_gray5 = (float3){ 0.5f, 0.5f, 0.5f };
-	return color_gray5;
+//	*attn *= (hit->id == 4) ? color_white : color_gray5; // #todo Light colors.
+	*attn *= color_gray5;
+	return false;
 /*
 	float3 dir = normalize(ray.dir);
 	float t = 0.5f * (dir.y + 1.0f);
@@ -253,13 +253,10 @@ const int image_height = 720;
 const int num_samples = 256;
 const int num_bounces = 8;
 
-void progressbar(int y)
+void progress(int y)
 {
 	if (((y+1) % (image_height/10)) == 0)
-	{
-		OutputDebugStringA(".");
 		printf(".");
-	}
 }
 
 void render_sphere3_v1()
@@ -274,7 +271,9 @@ void render_sphere3_v1()
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  0.0f, 0.0f, 0.0f }, 1.0f }},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){ -2.0f, 0.0f, 0.0f }, 1.0f }},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f }},
-		{ nullptr }
+//		{ &pt_geom_sphere_trace, &pt_scatter_light,   .sphere = { (float3){  1.0f, 1.732f, 0.0f }, 1.0f }}, // #todo Light colors.
+		{ &pt_geom_sky_trace,    &pt_scatter_light },
+		{ NULL }
 	};
 
 	// Camera setup.
@@ -290,7 +289,7 @@ void render_sphere3_v1()
 	int i = 0;
 	for (int y = 0; y < image_height; y++)
 	{
-		progressbar(y);
+		progress(y);
 		for (int x = 0; x < image_width; x++)
 		{
 			float3 color_acc = { 0.0f, 0.0f, 0.0f };
@@ -309,11 +308,15 @@ void render_sphere3_v1()
 				for (int b = 0; b < num_bounces; b++)
 				{
 					pt_hit hit;
-					if (!pt_scene_trace(scene, &hit, ray, 0.0001f, FLT_MAX) ||
-						!pt_scene_scatter(scene, &hit, &ray, &attn))
+					if (!pt_scene_trace(scene, &hit, ray, 0.0001f, FLT_MAX))
 					{
-						// No hit: background color, terminate ray.
-						color_acc += attn * pt_background(ray);
+						// No hit, terminate ray.
+						break; 
+					}
+					if (!pt_scene_scatter(scene, &hit, &ray, &attn))
+					{
+						// Light hit: accumulate color and terminate ray.
+						color_acc += attn;
 						break;
 					}
 				}
@@ -327,6 +330,7 @@ void render_sphere3_v1()
 			// Gamma correction
 			color_acc = linear_to_srgb(color_acc);
 
+			// #todo Reconstruction filters.
 			image_data_srgb[i++] = (int)(255 * color_acc.x);
 			image_data_srgb[i++] = (int)(255 * color_acc.y);
 			image_data_srgb[i++] = (int)(255 * color_acc.z);
