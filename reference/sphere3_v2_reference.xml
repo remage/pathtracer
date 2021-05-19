@@ -62,7 +62,6 @@
 
 	<shape type="sphere">
 		<bsdf type="roughdiffuse">
-			<boolean name="useFastApprox" value="true"/>
 			<rgb name="reflectance" value="0.3, 0.3, 0.3"/>
 			<float name="alpha" value="0.5"/>
 		</bsdf>
