@@ -244,17 +244,18 @@ bool pt_scatter_oren_nayar(const struct pt_geom* geom, const pt_material* mat, c
 	float3 refl = normalize(hit->normal + f3_rand_unit_sphere());
 
 	float roughness = 0.5;
-	float sigma = roughness*roughness / sqrt(2.0);
+	float sigma = roughness / sqrt(2.0);
 	float sigma2 = sigma*sigma;
-	float a = 1.0 - 0.5 * sigma2 / (sigma2 + 0.33);
-	float b = 0.45 * sigma2 / (sigma2 + 0.09);
-	float phi_i = acos(min(max(dot(hit->normal, -ray->dir), -1.0), 1.0));
-	float phi_r = acos(min(max(dot(hit->normal, refl), -1.0), 1.0));
-	float alpha = max(phi_i, phi_r);
-	float beta = min(phi_i, phi_r);
 
-	*attn *= a + b * max(0.0, cos(phi_r - phi_i)) * sin(alpha) * tan(beta);
-	*attn *= mat->color;
+	float n_dot_l = dot(hit->normal, refl);
+	float n_dot_v = dot(hit->normal, -ray->dir);
+	float l_dot_v = dot(refl, -ray->dir);
+	float s = l_dot_v - n_dot_l * n_dot_v;
+	float t = s <= 0.0 ? 1.0 : max(n_dot_l, n_dot_v);
+	float3 a = 1.0 - 0.5 * sigma2 / (sigma2 + 0.33) + 0.17 * mat->color * sigma2 / (sigma2 + 0.13);
+	float b = 0.45 * sigma2 / (sigma2 + 0.09);
+
+	*attn *= mat->color * (a + b * s/t);
 
 	// Next ray; 
 	ray->origin = hit->point;
@@ -262,7 +263,7 @@ bool pt_scatter_oren_nayar(const struct pt_geom* geom, const pt_material* mat, c
 	return true;
 }
 
-// #todo BRDF: Light source. 
+// #todo BRDF: Light source.
 bool pt_scatter_light(const pt_geom* geom, const pt_material* mat, const pt_hit* hit, pt_ray* ray, float3* attn)
 {
 	*attn *= mat->color;
