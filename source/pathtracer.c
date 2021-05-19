@@ -304,8 +304,8 @@ void render_sphere3_v1()
 		{ &pt_geom_plane_trace,  &pt_scatter_diffuse, .plane  = { (float3){ 0.0f, -1.0f, 0.0f }, (float3){ 0.0f, 1.0f, 0.0f }}, .mat = { (float3){ 0.5f, 0.5f, 0.5f }}},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  0.0f, 0.0f, 0.0f }, 1.0f },						.mat = { srgb_to_linear((float3){ 0.788f, 0.122f, 0.216f }) }},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){ -2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 1.0f, 1.0f, 1.0f }}},
-		{ &pt_geom_sphere_trace, &pt_scatter_oren_nayar, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
-//		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
+//		{ &pt_geom_sphere_trace, &pt_scatter_oren_nayar, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
+		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
 //		{ &pt_geom_sphere_trace, &pt_scatter_light,   .sphere = { (float3){  1.0f, 1.732f, 0.0f }, 1.0f },                      .mat = { (float3){ 1.0f, 1.0f, 1.0f }}},
 		{ &pt_geom_sky_trace,    &pt_scatter_light,   																			.mat = { (float3){ 0.5f, 0.5f, 0.5f }}},
 		{ NULL }
