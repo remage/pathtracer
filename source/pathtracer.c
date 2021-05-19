@@ -238,6 +238,8 @@ bool pt_scatter_diffuse(const struct pt_geom* geom, const pt_material* mat, cons
 	return true;
 }
 
+// BRDF: Oren-Nayar approximation
+// https://mimosa-pudica.net/improved-oren-nayar.html
 bool pt_scatter_oren_nayar(const struct pt_geom* geom, const pt_material* mat, const pt_hit* hit, pt_ray* ray, float3* attn)
 {
 	// Reflect the incoming ray to a random direction (cosine-weighted distribution fn).
@@ -245,15 +247,17 @@ bool pt_scatter_oren_nayar(const struct pt_geom* geom, const pt_material* mat, c
 
 	float roughness = 0.5;
 	float sigma = roughness / sqrt(2.0);
-	float sigma2 = sigma*sigma;
+//	float sigma2 = sigma*sigma;
+//	float3 a = 1.0 - 0.5 * sigma2 / (sigma2 + 0.33) + 0.17 * mat->color * sigma2 / (sigma2 + 0.13);
+//	float b = 0.45 * sigma2 / (sigma2 + 0.09);
+	float a = 1.0 / (1.0 + 0.2877934 * sigma);
+	float b = sigma * a;
 
 	float n_dot_l = dot(hit->normal, refl);
 	float n_dot_v = dot(hit->normal, -ray->dir);
 	float l_dot_v = dot(refl, -ray->dir);
 	float s = l_dot_v - n_dot_l * n_dot_v;
 	float t = s <= 0.0 ? 1.0 : max(n_dot_l, n_dot_v);
-	float3 a = 1.0 - 0.5 * sigma2 / (sigma2 + 0.33) + 0.17 * mat->color * sigma2 / (sigma2 + 0.13);
-	float b = 0.45 * sigma2 / (sigma2 + 0.09);
 
 	*attn *= mat->color * (a + b * s/t);
 
@@ -300,8 +304,8 @@ void render_sphere3_v1()
 		{ &pt_geom_plane_trace,  &pt_scatter_diffuse, .plane  = { (float3){ 0.0f, -1.0f, 0.0f }, (float3){ 0.0f, 1.0f, 0.0f }}, .mat = { (float3){ 0.5f, 0.5f, 0.5f }}},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  0.0f, 0.0f, 0.0f }, 1.0f },						.mat = { srgb_to_linear((float3){ 0.788f, 0.122f, 0.216f }) }},
 		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){ -2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 1.0f, 1.0f, 1.0f }}},
-//		{ &pt_geom_sphere_trace, &pt_scatter_oren_nayar, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
-		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
+		{ &pt_geom_sphere_trace, &pt_scatter_oren_nayar, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
+//		{ &pt_geom_sphere_trace, &pt_scatter_diffuse, .sphere = { (float3){  2.0f, 0.0f, 0.0f }, 1.0f },						.mat = { (float3){ 0.3f, 0.3f, 0.3f }}},
 //		{ &pt_geom_sphere_trace, &pt_scatter_light,   .sphere = { (float3){  1.0f, 1.732f, 0.0f }, 1.0f },                      .mat = { (float3){ 1.0f, 1.0f, 1.0f }}},
 		{ &pt_geom_sky_trace,    &pt_scatter_light,   																			.mat = { (float3){ 0.5f, 0.5f, 0.5f }}},
 		{ NULL }
